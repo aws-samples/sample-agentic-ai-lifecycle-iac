@@ -1,0 +1,72 @@
+# Terraform
+*.tfstate
+*.tfstate.*
+*.tfvars.backup
+.terraform/
+.terraform.lock.hcl
+crash.log
+override.tf
+override.tf.json
+*_override.tf
+*_override.tf.json
+
+# Sensitive files
+*.pem
+*.key
+*.p12
+*.pfx
+*.cer
+*.crt
+*.der
+*.pub
+id_rsa*
+*.env
+.env.*
+secrets.yml
+secrets.yaml
+credentials
+*.credentials
+
+# AWS
+.aws/
+aws-credentials
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+venv/
+env/
+ENV/
+.venv
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Logs
+*.log
+logs/
+
+# Docker
+*.tar
+*.tar.gz
+
+# Backup files
+*.bak
+*.backup
+*~
+
+# Local testing
+test-output/
+.pytest_cache/
+
+# Kiro
+.kiro/cache/
+.kiro/steering/

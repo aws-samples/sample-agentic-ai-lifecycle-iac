@@ -1,0 +1,106 @@
+name: 01 - Build and Push Agent Container
+
+on:
+  push:
+    branches: [develop, main, BT]
+    paths:
+      - 'agent-app/**'
+  workflow_dispatch:  # checkov:skip=CKV_GHA_7:Inputs are sanitized via env vars before use in run steps
+    inputs:
+      environment:
+        description: 'Environment to build for'
+        required: true
+        default: 'dev'
+        type: choice
+        options:
+          - dev
+          - staging
+          - prod
+
+permissions:
+  id-token: write
+  contents: read
+
+env:
+  AWS_REGION: us-east-1
+
+jobs:
+  build-and-push:
+    name: Build and Push Container
+    runs-on: ubuntu-latest
+    
+    outputs:
+      image_uri: ${{ steps.image-details.outputs.image_uri }}
+      environment: ${{ steps.set-env.outputs.ENVIRONMENT }}
+      version: ${{ steps.set-env.outputs.VERSION }}
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Set environment
+        id: set-env
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          INPUT_ENVIRONMENT: ${{ github.event.inputs.environment }}
+          GIT_REF: ${{ github.ref }}
+        run: |
+          if [ "$EVENT_NAME" == "workflow_dispatch" ]; then
+            echo "ENVIRONMENT=$INPUT_ENVIRONMENT" >> $GITHUB_OUTPUT
+          elif [ "$GIT_REF" == "refs/heads/main" ]; then
+            echo "ENVIRONMENT=prod" >> $GITHUB_OUTPUT
+          else
+            echo "ENVIRONMENT=dev" >> $GITHUB_OUTPUT
+          fi
+          echo "VERSION=$(date +%Y%m%d-%H%M%S)-${GITHUB_SHA:0:7}" >> $GITHUB_OUTPUT
+      
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::${{ secrets.AWS_ACCOUNT_ID }}:role/github-actions-role
+          aws-region: ${{ env.AWS_REGION }}
+      
+      - name: Get config from Secrets Manager
+        id: config
+        run: |
+          CONFIG=$(aws secretsmanager get-secret-value \
+            --secret-id agentcore/config \
+            --query SecretString --output text)
+          
+          echo "ecr_repository=$(echo $CONFIG | jq -r .ecr_repository)" >> $GITHUB_OUTPUT
+      
+      - name: Login to Amazon ECR
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v2
+      
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+      
+      - name: Build and push Docker image
+        uses: docker/build-push-action@v5
+        with:
+          context: ./agent-app
+          push: true
+          platforms: linux/amd64,linux/arm64
+          tags: |
+            ${{ steps.login-ecr.outputs.registry }}/${{ steps.config.outputs.ecr_repository }}:${{ steps.set-env.outputs.ENVIRONMENT }}-latest
+            ${{ steps.login-ecr.outputs.registry }}/${{ steps.config.outputs.ecr_repository }}:${{ steps.set-env.outputs.ENVIRONMENT }}-${{ steps.set-env.outputs.VERSION }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+      
+      - name: Scan image with Trivy
+        uses: aquasecurity/trivy-action@master
+        #continue-on-error: true
+        with:
+          image-ref: ${{ steps.login-ecr.outputs.registry }}/${{ steps.config.outputs.ecr_repository }}:${{ steps.set-env.outputs.ENVIRONMENT }}-latest
+          format: 'table'
+      
+      - name: Output image details
+        id: image-details
+        run: |
+          IMAGE_URI="${{ steps.login-ecr.outputs.registry }}/${{ steps.config.outputs.ecr_repository }}:${{ steps.set-env.outputs.ENVIRONMENT }}-${{ steps.set-env.outputs.VERSION }}"
+          echo "image_uri=$IMAGE_URI" >> $GITHUB_OUTPUT
+          echo "### Container Image Built ✅" >> $GITHUB_STEP_SUMMARY
+          echo "**Image URI:** \`$IMAGE_URI\`" >> $GITHUB_STEP_SUMMARY
+          echo "**Environment:** ${{ steps.set-env.outputs.ENVIRONMENT }}" >> $GITHUB_STEP_SUMMARY
+          echo "**Version:** ${{ steps.set-env.outputs.VERSION }}" >> $GITHUB_STEP_SUMMARY

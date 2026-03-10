@@ -1,0 +1,97 @@
+name: 04 - Destroy Infrastructure
+
+on:
+  workflow_dispatch:  # checkov:skip=CKV_GHA_7:Inputs are sanitized via env vars before use in run steps
+    inputs:
+      environment:
+        description: 'Environment to destroy'
+        required: true
+        default: 'dev'
+        type: choice
+        options:
+          - dev
+      confirm_destroy:
+        description: 'Type "DESTROY" to confirm deletion'
+        required: true
+        type: string
+
+permissions:
+  id-token: write
+  contents: read
+
+env:
+  AWS_REGION: us-east-1
+
+jobs:
+  destroy-infrastructure:
+    name: Destroy Infrastructure
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Validate confirmation
+        env:
+          CONFIRM_DESTROY: ${{ github.event.inputs.confirm_destroy }}
+        run: |
+          if [ "$CONFIRM_DESTROY" != "DESTROY" ]; then
+            echo "❌ Confirmation failed. You must type 'DESTROY' to proceed."
+            exit 1
+          fi
+          echo "✅ Confirmation validated"
+      
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::${{ secrets.AWS_ACCOUNT_ID }}:role/github-actions-role
+          aws-region: ${{ env.AWS_REGION }}
+      
+      - name: Get configuration from Secrets Manager
+        id: config
+        run: |
+          CONFIG=$(aws secretsmanager get-secret-value \
+            --secret-id agentcore/config \
+            --query SecretString --output text)
+          
+          echo "tf_state_bucket=$(echo $CONFIG | jq -r .tf_state_bucket)" >> $GITHUB_OUTPUT
+      
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: 1.9.6
+      
+      - name: Terraform Init
+        working-directory: ./infrastructure/environments/${{ github.event.inputs.environment }}
+        env:
+          TF_STATE_BUCKET: ${{ steps.config.outputs.tf_state_bucket }}
+          INPUT_ENVIRONMENT: ${{ github.event.inputs.environment }}
+        run: |
+          terraform init \
+            -backend-config="bucket=${TF_STATE_BUCKET}" \
+            -backend-config="key=${INPUT_ENVIRONMENT}/terraform.tfstate" \
+            -backend-config="region=${AWS_REGION}"
+      
+      - name: Terraform Plan Destroy
+        id: plan
+        working-directory: ./infrastructure/environments/${{ github.event.inputs.environment }}
+        env:
+          INPUT_ENVIRONMENT: ${{ github.event.inputs.environment }}
+        run: |
+          terraform plan -destroy -out=tfplan-destroy
+          
+          echo "### Terraform Destroy Plan" >> $GITHUB_STEP_SUMMARY
+          echo "**Environment:** $INPUT_ENVIRONMENT" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "Review the plan above before proceeding with destroy." >> $GITHUB_STEP_SUMMARY
+      
+      - name: Terraform Destroy
+        working-directory: ./infrastructure/environments/${{ github.event.inputs.environment }}
+        env:
+          INPUT_ENVIRONMENT: ${{ github.event.inputs.environment }}
+        run: |
+          terraform apply -auto-approve tfplan-destroy
+          
+          echo "### Infrastructure Destroyed 🗑️" >> $GITHUB_STEP_SUMMARY
+          echo "**Environment:** $INPUT_ENVIRONMENT" >> $GITHUB_STEP_SUMMARY
+          echo "**Status:** All resources have been destroyed" >> $GITHUB_STEP_SUMMARY

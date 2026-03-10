@@ -1,0 +1,141 @@
+name: 02 - Deploy Infrastructure
+
+on:
+  workflow_run:
+    workflows: ["Build Agent Container"]
+    types: [completed]
+    branches: [develop, main, BT]
+  workflow_dispatch:  # checkov:skip=CKV_GHA_7:Inputs are sanitized via env vars before use in run steps
+    inputs:
+      environment:
+        description: 'Environment to deploy'
+        required: true
+        default: 'dev'
+        type: choice
+        options:
+          - dev
+          # staging and prod directories don't exist yet
+      container_uri:
+        description: 'Container URI (optional - uses latest if not provided)'
+        required: false
+
+permissions:
+  id-token: write
+  contents: read
+
+env:
+  AWS_REGION: us-east-1
+
+jobs:
+  deploy-infrastructure:
+    name: Deploy Infrastructure
+    runs-on: ubuntu-latest
+    if: ${{ github.event.workflow_run.conclusion == 'success' || github.event_name == 'workflow_dispatch' }}
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Determine environment
+        id: env
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          INPUT_ENVIRONMENT: ${{ github.event.inputs.environment }}
+        run: |
+          if [ "$EVENT_NAME" == "workflow_dispatch" ]; then
+            echo "ENVIRONMENT=$INPUT_ENVIRONMENT" >> $GITHUB_OUTPUT
+          else
+            # Always use dev for auto-triggered deployments (only dev environment exists)
+            echo "ENVIRONMENT=dev" >> $GITHUB_OUTPUT
+          fi
+      
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::${{ secrets.AWS_ACCOUNT_ID }}:role/github-actions-role
+          aws-region: ${{ env.AWS_REGION }}
+      
+      - name: Get configuration from Secrets Manager
+        id: config
+        run: |
+          CONFIG=$(aws secretsmanager get-secret-value \
+            --secret-id agentcore/config \
+            --query SecretString --output text)
+          
+          echo "tf_state_bucket=$(echo $CONFIG | jq -r .tf_state_bucket)" >> $GITHUB_OUTPUT
+          echo "ecr_repository=$(echo $CONFIG | jq -r .ecr_repository)" >> $GITHUB_OUTPUT
+      
+      - name: Get latest container URI
+        id: container
+        env:
+          INPUT_CONTAINER_URI: ${{ github.event.inputs.container_uri }}
+          AWS_ACCOUNT_ID: ${{ secrets.AWS_ACCOUNT_ID }}
+          ECR_REPOSITORY: ${{ steps.config.outputs.ecr_repository }}
+          ENVIRONMENT: ${{ steps.env.outputs.ENVIRONMENT }}
+        run: |
+          if [ -n "$INPUT_CONTAINER_URI" ]; then
+            CONTAINER_URI="$INPUT_CONTAINER_URI"
+          else
+            CONTAINER_URI="${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com/${ECR_REPOSITORY}:${ENVIRONMENT}-latest"
+          fi
+          echo "container_uri=$CONTAINER_URI" >> $GITHUB_OUTPUT
+      
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: 1.9.6
+      
+      - name: Terraform Init
+        working-directory: ./infrastructure/environments/${{ steps.env.outputs.ENVIRONMENT }}
+        env:
+          TF_STATE_BUCKET: ${{ steps.config.outputs.tf_state_bucket }}
+          ENVIRONMENT: ${{ steps.env.outputs.ENVIRONMENT }}
+        run: |
+          terraform init \
+            -backend-config="bucket=${TF_STATE_BUCKET}" \
+            -backend-config="key=${ENVIRONMENT}/terraform.tfstate" \
+            -backend-config="region=${AWS_REGION}"
+      
+      - name: Remove traces delivery from state
+        working-directory: ./infrastructure/environments/${{ steps.env.outputs.ENVIRONMENT }}
+        run: |
+          terraform state rm 'module.runtime_observability.aws_cloudwatch_log_delivery.this["traces"]' || true
+          terraform state rm 'module.runtime_observability.aws_cloudwatch_log_delivery_source.this["traces"]' || true
+          terraform state rm 'module.runtime_observability.aws_cloudwatch_log_delivery_destination.this["traces"]' || true
+      
+      - name: Terraform Plan
+        id: plan
+        working-directory: ./infrastructure/environments/${{ steps.env.outputs.ENVIRONMENT }}
+        env:
+          CONTAINER_URI: ${{ steps.container.outputs.container_uri }}
+        run: |
+          terraform plan \
+            -var="container_uri=${CONTAINER_URI}" \
+            -out=tfplan
+      
+      - name: Terraform Apply
+        working-directory: ./infrastructure/environments/${{ steps.env.outputs.ENVIRONMENT }}
+        run: terraform apply -auto-approve tfplan
+      
+      - name: Get Terraform Outputs
+        id: outputs
+        working-directory: ./infrastructure/environments/${{ steps.env.outputs.ENVIRONMENT }}
+        env:
+          ENVIRONMENT: ${{ steps.env.outputs.ENVIRONMENT }}
+          CONTAINER_URI: ${{ steps.container.outputs.container_uri }}
+        run: |
+          RUNTIME_ID=$(terraform output -raw agent_runtime_id)
+          ENDPOINT_ARN=$(terraform output -raw agent_runtime_endpoint)
+          echo "runtime_id=$RUNTIME_ID" >> $GITHUB_OUTPUT
+          echo "endpoint_arn=$ENDPOINT_ARN" >> $GITHUB_OUTPUT
+          
+          echo "### Infrastructure Deployed ✅" >> $GITHUB_STEP_SUMMARY
+          echo "**Environment:** $ENVIRONMENT" >> $GITHUB_STEP_SUMMARY
+          echo "**Runtime ID:** \`$RUNTIME_ID\`" >> $GITHUB_STEP_SUMMARY
+          echo "**Endpoint ARN:** \`$ENDPOINT_ARN\`" >> $GITHUB_STEP_SUMMARY
+          echo "**Container:** \`$CONTAINER_URI\`" >> $GITHUB_STEP_SUMMARY
+    
+    outputs:
+      runtime_id: ${{ steps.outputs.outputs.runtime_id }}
+      endpoint_arn: ${{ steps.outputs.outputs.endpoint_arn }}
+      environment: ${{ steps.env.outputs.ENVIRONMENT }}

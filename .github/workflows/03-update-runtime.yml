@@ -1,0 +1,125 @@
+name: 03 - Update Runtime with New Version
+
+on:
+  workflow_dispatch:  # checkov:skip=CKV_GHA_7:Inputs are sanitized via env vars before use in run steps
+    inputs:
+      environment:
+        description: 'Environment to update'
+        required: true
+        type: choice
+        options:
+          - dev
+          # staging and prod directories don't exist yet
+      container_version:
+        description: 'Container version tag'
+        required: true
+
+permissions:
+  id-token: write
+  contents: read
+
+env:
+  AWS_REGION: us-east-1
+
+jobs:
+  update-runtime:
+    name: Update Runtime Version
+    runs-on: ubuntu-latest
+    environment: ${{ github.event.inputs.environment }}
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::${{ secrets.AWS_ACCOUNT_ID }}:role/github-actions-role
+          aws-region: ${{ env.AWS_REGION }}
+      
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: 1.9.6
+      
+      - name: Get new container URI
+        id: container
+        env:
+          AWS_ACCOUNT_ID: ${{ secrets.AWS_ACCOUNT_ID }}
+          INPUT_ENVIRONMENT: ${{ github.event.inputs.environment }}
+          INPUT_VERSION: ${{ github.event.inputs.container_version }}
+        run: |
+          CONTAINER_URI="${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com/agentcore-dev-agent:${INPUT_ENVIRONMENT}-${INPUT_VERSION}"
+          echo "container_uri=$CONTAINER_URI" >> $GITHUB_OUTPUT
+          
+          # Verify image exists
+          aws ecr describe-images \
+            --repository-name agentcore-dev-agent \
+            --image-ids "imageTag=${INPUT_ENVIRONMENT}-${INPUT_VERSION}"
+      
+      - name: Terraform Init
+        working-directory: ./infrastructure/environments/${{ github.event.inputs.environment }}
+        env:
+          TF_STATE_BUCKET: ${{ secrets.TF_STATE_BUCKET }}
+          INPUT_ENVIRONMENT: ${{ github.event.inputs.environment }}
+        run: |
+          terraform init \
+            -backend-config="bucket=${TF_STATE_BUCKET}" \
+            -backend-config="key=${INPUT_ENVIRONMENT}/terraform.tfstate" \
+            -backend-config="region=${AWS_REGION}"
+      
+      - name: Update Runtime
+        working-directory: ./infrastructure/environments/${{ github.event.inputs.environment }}
+        env:
+          CONTAINER_URI: ${{ steps.container.outputs.container_uri }}
+        run: |
+          terraform apply \
+            -var="container_uri=${CONTAINER_URI}" \
+            -auto-approve
+      
+      - name: Wait for Runtime Update
+        run: |
+          echo "Waiting for runtime to stabilize..."
+          sleep 30
+      
+      - name: Run Health Check
+        id: health
+        env:
+          INPUT_ENVIRONMENT: ${{ github.event.inputs.environment }}
+        run: |
+          RUNTIME_ID=$(cd "infrastructure/environments/${INPUT_ENVIRONMENT}" && terraform output -raw agent_runtime_id)
+          
+          # Check runtime status
+          STATUS=$(aws bedrock-agentcore describe-agent-runtime \
+            --agent-runtime-id $RUNTIME_ID \
+            --query 'agentRuntime.status' \
+            --output text)
+          
+          if [ "$STATUS" != "ACTIVE" ]; then
+            echo "Runtime status: $STATUS"
+            exit 1
+          fi
+          
+          echo "✅ Runtime is ACTIVE"
+      
+      - name: Run Integration Tests
+        env:
+          INPUT_ENVIRONMENT: ${{ github.event.inputs.environment }}
+        run: |
+          ENDPOINT_ARN=$(cd "infrastructure/environments/${INPUT_ENVIRONMENT}" && terraform output -raw agent_runtime_endpoint)
+          
+          python agent-app/tests/test_integration.py \
+            --endpoint $ENDPOINT_ARN \
+            --environment "$INPUT_ENVIRONMENT"
+      
+      - name: Deployment Summary
+        env:
+          INPUT_ENVIRONMENT: ${{ github.event.inputs.environment }}
+          INPUT_VERSION: ${{ github.event.inputs.container_version }}
+          CONTAINER_URI: ${{ steps.container.outputs.container_uri }}
+        run: |
+          echo "### Runtime Updated ✅" >> $GITHUB_STEP_SUMMARY
+          echo "**Environment:** $INPUT_ENVIRONMENT" >> $GITHUB_STEP_SUMMARY
+          echo "**Version:** $INPUT_VERSION" >> $GITHUB_STEP_SUMMARY
+          echo "**Container:** \`$CONTAINER_URI\`" >> $GITHUB_STEP_SUMMARY
+          echo "**Status:** Active and Healthy" >> $GITHUB_STEP_SUMMARY
