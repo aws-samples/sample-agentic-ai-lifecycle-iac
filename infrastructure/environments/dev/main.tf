@@ -445,6 +445,27 @@ resource "aws_iam_role_policy" "agent_execution" {
         ]
       },
       {
+        # Allow the agent to apply Bedrock Guardrails during ConverseStream calls
+        Effect = "Allow"
+        Action = [
+          "bedrock:ApplyGuardrail"
+        ]
+        Resource = aws_bedrock_guardrail.example.guardrail_arn
+      },
+      {
+        # Allow the agent to invoke Bedrock foundation models (required for Strands agent
+        # ConverseStream calls and browser-use BrowserAgent LLM calls)
+        Effect = "Allow"
+        Action = [
+          "bedrock:InvokeModel",
+          "bedrock:InvokeModelWithResponseStream"
+        ]
+        Resource = [
+          "arn:aws:bedrock:${var.aws_region}::foundation-model/us.anthropic.claude-sonnet-4-20250514-v1:0",
+          "arn:aws:bedrock:${var.aws_region}::foundation-model/us.anthropic.claude-3-7-sonnet-20250219-v1:0"
+        ]
+      },
+      {
         Effect = "Allow"
         Action = [
           "ecr:GetAuthorizationToken" # nosemgrep: terraform.lang.security.iam.no-iam-creds-exposure.no-iam-creds-exposure - AWS requirement, cannot scope to specific resource
@@ -815,146 +836,114 @@ module "runtime_observability" {
   }
 }
 
-# module "memory_observability" {
-#   source  = "tfedev.it.statestr.com/SSC/bedrock-agentcore-observability/aws"
-#   version = "1.0.0"
+module "memory_observability" {
+  source = "../../modules/agentcore-observability"
 
-#   resource_name              = module.agentcore_memory.memory_id
-#   enable_genai_observability = false
+  resource_name = module.agentcore_memory.memory_id
 
-#   xray_sampling_rule = {
-#     rule_name    = "${local.name_prefix}memory"
-#     service_name = module.agentcore_memory.memory_id
-#     priority     = 8200
-#     fixed_rate   = 0.1
-#   }
+  xray_sampling_rule = {
+    rule_name    = "${local.name_prefix}memory"
+    service_name = module.agentcore_memory.memory_id
+    priority     = 8200
+    fixed_rate   = 0.1
+  }
 
-#   log_deliveries = {
-#     traces = {
-#       resource_arn             = module.agentcore_memory.memory_arn
-#       log_type                 = "TRACES"
-#       destination_type         = "XRAY"
-#       destination_resource_arn = null
-#     }
-#     usage = {
-#       resource_arn             = module.agentcore_memory.memory_arn
-#       log_type                 = "USAGE_LOGS"
-#       destination_type         = "CWL"
-#       destination_resource_arn = aws_cloudwatch_log_group.memory_usage.arn
-#     }
-#   }
+  log_deliveries = {
+    app_logs = {
+      resource_arn             = module.agentcore_memory.memory_arn
+      log_type                 = "APPLICATION_LOGS"
+      destination_type         = "CWL"
+      destination_resource_arn = aws_cloudwatch_log_group.memory_usage.arn
+    }
+  }
 
-#   name_prefix = "${local.name_prefix}mem-"
+  name_prefix = "${local.name_prefix}mem-"
 
-#   providers = {
-#     aws.target_region = aws.primary_region
-#   }
-# }
+  providers = {
+    aws.target_region = aws.primary_region
+  }
+}
 
-# module "browser_observability" {
-#   source  = "tfedev.it.statestr.com/SSC/bedrock-agentcore-observability/aws"
-#   version = "1.0.0"
+module "browser_observability" {
+  source = "../../modules/agentcore-observability"
 
-#   resource_name              = module.agentcore_tools.browser_id
-#   enable_genai_observability = false
+  resource_name = module.agentcore_tools.browser_id
 
-#   xray_sampling_rule = {
-#     rule_name    = "${local.name_prefix}browser"
-#     service_name = module.agentcore_tools.browser_id
-#     priority     = 8300
-#     fixed_rate   = 0.1
-#   }
+  xray_sampling_rule = {
+    rule_name    = "${local.name_prefix}browser"
+    service_name = module.agentcore_tools.browser_id
+    priority     = 8300
+    fixed_rate   = 0.1
+  }
 
-#   log_deliveries = {
-#     traces = {
-#       resource_arn             = module.agentcore_tools.browser_arn
-#       log_type                 = "TRACES"
-#       destination_type         = "XRAY"
-#       destination_resource_arn = null
-#     }
-#     usage = {
-#       resource_arn             = module.agentcore_tools.browser_arn
-#       log_type                 = "USAGE_LOGS"
-#       destination_type         = "CWL"
-#       destination_resource_arn = aws_cloudwatch_log_group.browser_usage.arn
-#     }
-#   }
+  log_deliveries = {
+    usage = {
+      resource_arn             = module.agentcore_tools.browser_arn
+      log_type                 = "USAGE_LOGS"
+      destination_type         = "CWL"
+      destination_resource_arn = aws_cloudwatch_log_group.browser_usage.arn
+    }
+  }
 
-#   name_prefix = "${local.name_prefix}br-"
+  name_prefix = "${local.name_prefix}br-"
 
-#   providers = {
-#     aws.target_region = aws.primary_region
-#   }
-# }
+  providers = {
+    aws.target_region = aws.primary_region
+  }
+}
 
-# module "code_interpreter_observability" {
-#   source  = "tfedev.it.statestr.com/SSC/bedrock-agentcore-observability/aws"
-#   version = "1.0.0"
+module "code_interpreter_observability" {
+  source = "../../modules/agentcore-observability"
 
-#   resource_name              = module.agentcore_tools.code_interpreter_id
-#   enable_genai_observability = false
+  resource_name = module.agentcore_tools.code_interpreter_id
 
-#   xray_sampling_rule = {
-#     rule_name    = "${local.name_prefix}code-interp"
-#     service_name = module.agentcore_tools.code_interpreter_id
-#     priority     = 8000
-#     fixed_rate   = 0.1
-#   }
+  xray_sampling_rule = {
+    rule_name    = "${local.name_prefix}code-interp"
+    service_name = module.agentcore_tools.code_interpreter_id
+    priority     = 8000
+    fixed_rate   = 0.1
+  }
 
-#   log_deliveries = {
-#     traces = {
-#       resource_arn             = module.agentcore_tools.code_interpreter_arn
-#       log_type                 = "TRACES"
-#       destination_type         = "XRAY"
-#       destination_resource_arn = null
-#     }
-#     usage = {
-#       resource_arn             = module.agentcore_tools.code_interpreter_arn
-#       log_type                 = "USAGE_LOGS"
-#       destination_type         = "CWL"
-#       destination_resource_arn = aws_cloudwatch_log_group.code_interpreter_usage.arn
-#     }
-#   }
+  log_deliveries = {
+    usage = {
+      resource_arn             = module.agentcore_tools.code_interpreter_arn
+      log_type                 = "USAGE_LOGS"
+      destination_type         = "CWL"
+      destination_resource_arn = aws_cloudwatch_log_group.code_interpreter_usage.arn
+    }
+  }
 
-#   name_prefix = "${local.name_prefix}ci-"
+  name_prefix = "${local.name_prefix}ci-"
 
-#   providers = {
-#     aws.target_region = aws.primary_region
-#   }
-# }
+  providers = {
+    aws.target_region = aws.primary_region
+  }
+}
 
-# module "gateway_observability" {
-#   source  = "tfedev.it.statestr.com/SSC/bedrock-agentcore-observability/aws"
-#   version = "1.0.0"
+module "gateway_observability" {
+  source = "../../modules/agentcore-observability"
 
-#   resource_name              = module.agentcore_gateway.gateway_id
-#   enable_genai_observability = false
+  resource_name = module.agentcore_gateway.gateway_id
 
-#   xray_sampling_rule = {
-#     rule_name    = "${local.name_prefix}gateway"
-#     service_name = module.agentcore_gateway.gateway_id
-#     priority     = 8400
-#     fixed_rate   = 0.1
-#   }
+  xray_sampling_rule = {
+    rule_name    = "${local.name_prefix}gateway"
+    service_name = module.agentcore_gateway.gateway_id
+    priority     = 8400
+    fixed_rate   = 0.1
+  }
 
-#   log_deliveries = {
-#     traces = {
-#       resource_arn             = module.agentcore_gateway.gateway_arn
-#       log_type                 = "TRACES"
-#       destination_type         = "XRAY"
-#       destination_resource_arn = null
-#     }
-#     usage = {
-#       resource_arn             = module.agentcore_gateway.gateway_arn
-#       log_type                 = "USAGE_LOGS"
-#       destination_type         = "CWL"
-#       destination_resource_arn = aws_cloudwatch_log_group.gateway_usage.arn
-#     }
-#   }
+  log_deliveries = {
+    app_logs = {
+      resource_arn             = module.agentcore_gateway.gateway_arn
+      log_type                 = "APPLICATION_LOGS"
+      destination_type         = "CWL"
+      destination_resource_arn = aws_cloudwatch_log_group.gateway_usage.arn
+    }
+  }
 
-#   name_prefix = "${local.name_prefix}gw-"
+  name_prefix = "${local.name_prefix}gw-"
 
-#   providers = {
-#     aws.target_region = aws.primary_region
-#   }
-# }
+  providers = {
+    aws.target_region = aws.primary_region
+  }
+}
