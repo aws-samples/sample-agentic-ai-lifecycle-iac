@@ -3,7 +3,7 @@
 Complete end-to-end solution for deploying agentic AI applications using Amazon Bedrock AgentCore with Terraform IaC and automated CI/CD via GitHub Actions.
 
 ## Architecture
-![AgentCore DevOps Solution Architecture](architecure.png)
+![AgentCore Architecture Diagram](architecture.png)
 
 ## Repository Structure
 
