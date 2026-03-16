@@ -1,225 +1,232 @@
 # AgentCore DevOps Solution
 
-Complete end-to-end solution for deploying agentic AI applications using Amazon Bedrock AgentCore with automated CI/CD.
+Complete end-to-end solution for deploying agentic AI applications using Amazon Bedrock AgentCore with Terraform IaC and automated CI/CD via GitHub Actions.
+
+## Architecture
+
 
 ## Repository Structure
 
 ```
-agentcore-solution/
-├── agent-app/                      # Agentic AI Application
+├── agent-app/                          # Agentic AI Application
 │   ├── src/
-│   │   ├── agent.py               # Main agent logic
-│   │   ├── tools.py               # Custom tools
-│   │   └── config.py              # Configuration
+│   │   └── agent.py                    # Main agent (Strands + browser-use)
 │   ├── tests/
-│   │   ├── test_agent.py          # Unit tests
-│   │   └── test_integration.py    # Integration tests
-│   ├── Dockerfile                 # Container definition
-│   ├── requirements.txt           # Python dependencies
-│   └── README.md                  # App documentation
+│   │   └── smoke_test.py               # Smoke tests
+│   ├── Dockerfile                      # Container (Amazon Linux 2023 ARM64)
+│   └── requirements.txt                # Python dependencies
 │
-├── infrastructure/                 # Terraform Infrastructure
-│   ├── modules/                   # L1 Terraform modules
-│   │   ├── agentcore-runtime/
-│   │   ├── agentcore-memory/
-│   │   ├── agentcore-gateway/
-│   │   ├── agentcore-identity/
-│   │   ├── agentcore-tools/
-│   │   └── agentcore-observability/
-│   ├── environments/              # Environment configs
-│   │   ├── dev/
-│   │   │   ├── main.tf
-│   │   │   ├── variables.tf
-│   │   │   ├── outputs.tf
-│   │   │   └── terraform.tfvars
-│   │   ├── staging/
-│   │   └── prod/
-│   └── caller-module/             # Orchestration module
-│       ├── main.tf
-│       ├── variables.tf
-│       └── outputs.tf
+├── infrastructure/                     # Terraform Infrastructure
+│   ├── modules/                        # Reusable Terraform modules
+│   │   ├── agentcore-runtime/          # Agent execution environment
+│   │   ├── agentcore-memory/           # Conversation memory
+│   │   ├── agentcore-gateway/          # MCP gateway + targets
+│   │   ├── agentcore-identity/         # Auth providers
+│   │   ├── agentcore-tools/            # Browser & Code Interpreter
+│   │   └── agentcore-observability/    # Logging & tracing
+│   └── environments/
+│       └── dev/                        # Dev environment config
+│           ├── main.tf                 # All resources + modules
+│           ├── bedrock-guardrails.tf   # Bedrock Guardrail config
+│           ├── lambda-functions/       # Gateway Lambda target
+│           └── *.tf                    # Variables, outputs, etc.
 │
-├── .github/
-│   └── workflows/
-│       ├── 01-build-agent.yml     # Build & push container
-│       ├── 02-deploy-infra.yml    # Deploy infrastructure
-│       ├── 03-update-runtime.yml  # Update with new image
-│       └── ci.yml                 # Continuous integration
-│
-├── docs/
-│   ├── architecture.md
-│   └── deployment-guide.md
+├── .github/workflows/
+│   ├── 01-build-agent.yml              # Build & push container to ECR
+│   ├── 02-deploy-infra.yml             # Terraform plan/apply
+│   ├── 03-update-runtime.yml           # Update runtime version + endpoint
+│   └── 04-destroy-infra.yml            # Teardown infrastructure
 │
 ├── scripts/
-│   ├── build-and-push.sh
-│   └── deploy.sh
+│   └── setup-foundation.sh             # Foundation setup script
 │
+├── SECURITY.md                         # Security considerations
 └── README.md
 ```
 
-## Deployment Flow
+## Components
 
-```
-┌─────────────────────────────────────────────────────────────┐
-│  1. Code Push to GitHub                                     │
-└─────────────────────────────────────────────────────────────┘
-                            ↓
-┌─────────────────────────────────────────────────────────────┐
-│  2. GitHub Actions: Build Agent Container                   │
-│     - Run tests                                             │
-│     - Build Docker image                                    │
-│     - Push to ECR with version tag                          │
-└─────────────────────────────────────────────────────────────┘
-                            ↓
-┌─────────────────────────────────────────────────────────────┐
-│  3. GitHub Actions: Deploy Infrastructure                   │
-│     - Terraform init/plan/apply                             │
-│     - Create AgentCore components                           │
-│     - Deploy runtime with new container                     │
-└─────────────────────────────────────────────────────────────┘
-                            ↓
-┌─────────────────────────────────────────────────────────────┐
-│  4. GitHub Actions: Update Runtime Endpoint                 │
-│     - Create new runtime version                            │
-│     - Update endpoint to new version                        │
-│     - Run smoke tests                                       │
-└─────────────────────────────────────────────────────────────┘
-```
+### Agent Application
+- Built with [Strands Agents SDK](https://github.com/strands-agents/strands-agents) using Claude Sonnet 4 as the primary model
+- Browser automation via [browser-use](https://github.com/browser-use/browser-use) with Claude 3.7 Sonnet driving the browser agent
+- Integrated with all AgentCore services: Gateway, Memory, Code Interpreter, Browser, Identity
+- Containerized on Amazon Linux 2023 (ARM64) with ADOT for observability
+
+### Infrastructure Modules
+| Module | Description |
+|--------|-------------|
+| agentcore-runtime | Agent execution environment with versioned endpoints |
+| agentcore-memory | Short-term + long-term memory with User Preference strategy |
+| agentcore-gateway | MCP protocol gateway with Lambda target (policy lookup) |
+| agentcore-identity | Workload identity provider |
+| agentcore-tools | Browser and Code Interpreter tools |
+| agentcore-observability | CloudWatch log delivery + X-Ray sampling rules |
+
+### Security
+- Bedrock Guardrails (content filtering, PII detection, denied topics, word filters)
+- KMS encryption for all sensitive data (logs, secrets, SQS)
+- IAM least privilege with scoped policies
+- VPC Flow Logs with KMS encryption (optional VPC deployment)
+- Lambda code signing
+- GitHub Actions OIDC (no long-lived credentials)
+
+### Observability
+| Resource | Log Type | Destination |
+|----------|----------|-------------|
+| Runtime | USAGE_LOGS | CloudWatch Logs |
+| Browser | USAGE_LOGS | CloudWatch Logs |
+| Code Interpreter | USAGE_LOGS | CloudWatch Logs |
+| Memory | APPLICATION_LOGS | CloudWatch Logs |
+| Gateway | APPLICATION_LOGS | CloudWatch Logs |
+
+All log groups use 365-day retention with KMS encryption. X-Ray sampling rules are configured for runtime, browser, code interpreter, memory, and gateway resources.
+
+## IAM Permissions
+
+### Agent Execution Role
+The agent execution role (`agentcore-{project}-{env}-agent-execution-role`) requires:
+- `BedrockAgentCoreFullAccess` managed policy (AgentCore APIs)
+- `bedrock:InvokeModel` and `bedrock:InvokeModelWithResponseStream` for Claude Sonnet 4 and Claude 3.7 Sonnet
+- `bedrock:ApplyGuardrail` scoped to the guardrail ARN
+- `secretsmanager:GetSecretValue` scoped to specific secret paths (`agentcore/config-*`, `agentcore/db-credentials-*`, `agentcore/api-keys-*`)
+- `ecr:GetAuthorizationToken` (resource: `*` — AWS requirement)
+- `ecr:BatchCheckLayerAvailability`, `ecr:GetDownloadUrlForLayer`, `ecr:BatchGetImage` scoped to `agentcore-*` repositories
+- `kms:Decrypt`, `kms:GenerateDataKey`, `kms:DescribeKey` for the AgentCore KMS key
+
+### Gateway Execution Role
+- `lambda:InvokeFunction` scoped to the policy lookup Lambda
+- KMS permissions for the AgentCore key
 
 ## Quick Start
 
-### 1. Clone Repository
+### Prerequisites
+- AWS account with Bedrock AgentCore access
+- Terraform >= 1.0
+- Docker (for building the agent container)
+- AWS CLI configured
+- GitHub repository with OIDC configured for AWS
+
+### 1. Foundation Setup
 ```bash
-git clone <your-repo>
-cd agentcore-solution
+# Run the foundation setup script
+./scripts/setup-foundation.sh
 ```
 
-### 2. Configure AWS Credentials
-```bash
-# Set up GitHub OIDC for AWS
-aws iam create-open-id-connect-provider \
-  --url https://token.actions.githubusercontent.com \
-  --client-id-list sts.amazonaws.com
-```
-
-### 3. Deploy Development Environment
+### 2. Deploy Infrastructure
 ```bash
 cd infrastructure/environments/dev
 terraform init
+terraform plan
 terraform apply
 ```
 
-### 4. Build and Deploy Agent
+### 3. Build and Push Agent Container
 ```bash
-cd ../../../agent-app
-docker build -t agent:dev .
-# Push to ECR (automated via GitHub Actions)
+cd agent-app
+docker build --platform linux/arm64 -t agentcore-agent:latest .
+# Tag and push to ECR (automated via GitHub Actions workflow 01)
 ```
 
-## Environment Variables
+### 4. Test in Agent Sandbox
+Navigate to Amazon Bedrock AgentCore → Test → Agent sandbox in the AWS console.
 
-### GitHub Secrets Required
-- `AWS_ACCOUNT_ID` - Your AWS account ID
-- `AWS_REGION` - Deployment region (default: us-east-1)
-- `ECR_REPOSITORY` - ECR repository name
-- `TF_STATE_BUCKET` - S3 bucket for Terraform state
-
-### Agent App Environment Variables
-- `RUNTIME_ID` - AgentCore runtime ID
-- `MEMORY_ID` - AgentCore memory ID
-- `GATEWAY_URL` - AgentCore gateway endpoint
-- `API_KEY` - Authentication key
-
-## Key Features
-
-✅ **Automated CI/CD Pipeline**
-- Build agent container on code push
-- Deploy infrastructure with Terraform
-- Update runtime with new versions
-- Automated testing and validation
-
-✅ **Modular Infrastructure**
-- 6 reusable Terraform modules
-- Environment-specific configurations
-- Easy to extend and customize
-
-✅ **Production-Ready Agent**
-- Sample agentic AI application
-- Integration with AgentCore services
-- Memory, tools, and gateway support
-
-✅ **Multi-Environment Support**
-- Dev, Staging, Production
-- Approval gates for production
-- Environment-specific configurations
-
-## Deployment Commands
-
-### Manual Deployment
-```bash
-# Build agent
-./scripts/build-and-push.sh dev v1.0.0
-
-# Deploy infrastructure
-./scripts/deploy.sh dev
-
-# Update runtime
-cd infrastructure/environments/dev
-terraform apply -var="container_version=v1.0.0"
+Sample prompts:
+```json
+{"prompt": "What is POL-001?"}
+{"prompt": "Execute Python code to calculate factorial of 20"}
+{"prompt": "What is the temperature of Seattle?"}
+{"prompt": "Remember that my favorite color is blue. user_id: testuser1, session_id: session001"}
 ```
 
-### Automated Deployment (GitHub Actions)
-```bash
-# Push to develop branch → Auto-deploy to dev
-git push origin develop
+## CI/CD Pipeline
 
-# Create release tag → Deploy to production
-git tag v1.0.0
-git push origin v1.0.0
-```
+| Workflow | Trigger | Description |
+|----------|---------|-------------|
+| 01-build-agent | Push to main | Builds Docker image, pushes to ECR |
+| 02-deploy-infra | After build | Terraform init/plan/apply |
+| 03-update-runtime | After deploy | Creates new runtime version, updates endpoint |
+| 04-destroy-infra | Manual | Tears down all infrastructure |
 
 ## Testing
 
-### Unit Tests
+### Guardrail Validation
 ```bash
-cd agent-app
-pytest tests/test_agent.py
+# Test denied topic (financial advice)
+aws bedrock-runtime apply-guardrail \
+  --guardrail-identifier <GUARDRAIL_ID> \
+  --guardrail-version 1 \
+  --source INPUT \
+  --content '[{"text": {"text": "Should I invest in stocks?"}}]' \
+  --region us-east-1
+
+# Test PII detection
+aws bedrock-runtime apply-guardrail \
+  --guardrail-identifier <GUARDRAIL_ID> \
+  --guardrail-version 1 \
+  --source INPUT \
+  --content '[{"text": {"text": "My email is test@example.com"}}]' \
+  --region us-east-1
 ```
 
-### Integration Tests
+### Memory Validation
 ```bash
-pytest tests/test_integration.py --runtime-id <runtime-id>
+# Write an event
+aws bedrock-agentcore create-event \
+  --memory-id <MEMORY_ID> \
+  --actor-id "testuser1" \
+  --session-id "test-session-001" \
+  --event-timestamp "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+  --payload '[{"conversational": {"content": {"text": "My favorite color is blue"}, "role": "USER"}}]' \
+  --region us-east-1
+
+# List events
+aws bedrock-agentcore list-events \
+  --memory-id <MEMORY_ID> \
+  --actor-id "testuser1" \
+  --session-id "test-session-001" \
+  --include-payloads \
+  --region us-east-1
 ```
 
-### Smoke Tests
+### Code Interpreter Validation
 ```bash
-python tests/smoke_test.py --endpoint <endpoint-arn>
+# Start session
+aws bedrock-agentcore start-code-interpreter-session \
+  --code-interpreter-identifier <CODE_INTERPRETER_ID> \
+  --region us-east-1
+
+# Execute code
+aws bedrock-agentcore invoke-code-interpreter \
+  --code-interpreter-identifier <CODE_INTERPRETER_ID> \
+  --session-id <SESSION_ID> \
+  --name "executeCode" \
+  --arguments '{"code": "print(sum(range(1, 101)))", "language": "python"}' \
+  --region us-east-1
 ```
-
-## Monitoring
-
-### CloudWatch Logs
-```bash
-aws logs tail /aws/bedrock-agentcore/agentcore-dev-runtime --follow
-```
-
-### X-Ray Traces
-View in AWS Console → X-Ray → Traces
-
-### Metrics
-View in AWS Console → CloudWatch → Dashboards
 
 ## Troubleshooting
 
-See [docs/deployment-guide.md](docs/deployment-guide.md) for common issues and solutions.
+| Issue | Cause | Fix |
+|-------|-------|-----|
+| `AccessDeniedException: bedrock:ApplyGuardrail` | Agent role missing guardrail permission | Add `bedrock:ApplyGuardrail` scoped to guardrail ARN |
+| `AccessDeniedException: bedrock:InvokeModel` | Agent role missing model invocation permission | Add `bedrock:InvokeModel` for the foundation models used |
+| Browser timeout (15 min) | Agent role can't call the LLM that drives browser-use | Add `bedrock:InvokeModel` for Claude 3.7 Sonnet |
+| Memory/Gateway log delivery fails with `ValidationException` | Wrong log type for resource | Use `APPLICATION_LOGS` (not `USAGE_LOGS`) for memory and gateway |
+| weather.gov returns no results | Non-US city queried | weather.gov only supports US locations |
 
-## Contributing
+## Environment Variables (Agent Runtime)
 
-1. Create feature branch
-2. Make changes
-3. Run tests
-4. Submit PR
-5. Auto-deploy to dev on merge
+| Variable | Description |
+|----------|-------------|
+| `BROWSER_ID` | AgentCore Browser tool ID |
+| `CODE_INTERPRETER_ID` | AgentCore Code Interpreter tool ID |
+| `MEMORY_ID` | AgentCore Memory ID |
+| `AWS_REGION` | AWS region |
+| `GATEWAY_ID` | AgentCore Gateway ID |
+| `GATEWAY_URL` | AgentCore Gateway endpoint URL |
+| `WORKLOAD_IDENTITY_NAME` | Workload identity provider name |
+| `GUARDRAIL_ID` | Bedrock Guardrail ID |
+| `GUARDRAIL_VERSION` | Bedrock Guardrail version |
 
 ## Security
 
