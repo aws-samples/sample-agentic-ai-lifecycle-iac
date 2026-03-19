@@ -1,4 +1,4 @@
-FROM --platform=linux/arm64 public.ecr.aws/amazonlinux/amazonlinux:2023
+FROM public.ecr.aws/amazonlinux/amazonlinux:2023
 
 RUN dnf update -y && \
     dnf install -y python3.11 python3.11-pip shadow-utils gcc python3.11-devel && \
