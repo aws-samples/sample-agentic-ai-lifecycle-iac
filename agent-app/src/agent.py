@@ -158,10 +158,7 @@ from bedrock_agentcore.tools.code_interpreter_client import CodeInterpreter
 from bedrock_agentcore.tools.browser_client import BrowserClient
 from bedrock_agentcore.memory import MemoryClient
 from bedrock_agentcore.services.identity import IdentityClient
-from browser_use import Agent as BrowserAgent
-from browser_use.browser.session import BrowserSession
-from browser_use.browser import BrowserProfile
-from langchain_aws import ChatBedrockConverse, ChatBedrock
+from playwright.async_api import async_playwright
 from contextlib import suppress
 from datetime import datetime
 from botocore.auth import SigV4Auth
@@ -189,34 +186,16 @@ GUARDRAIL_ID = os.getenv('GUARDRAIL_ID', '')
 GUARDRAIL_VERSION = os.getenv('GUARDRAIL_VERSION', '1')
 
 # Helper functions for browser
-async def run_browser_task(browser_session, bedrock_chat, task: str) -> str:
-    """Run a browser automation task"""
-    agent = BrowserAgent(task=task, llm=bedrock_chat, browser=browser_session)
-    result = await agent.run()
-    
-    if 'done' in result.last_action() and 'text' in result.last_action()['done']:
-        return result.last_action()['done']['text']
-    else:
-        raise ValueError("No data returned")
-
 async def initialize_browser_session():
-    """Initialize Browser session"""
+    """Initialize Browser session via CDP and Playwright"""
     client = BrowserClient(AWS_REGION)
     client.start(identifier=BROWSER_ID)
-    
-    ws_url, headers = client.generate_ws_headers()
-    browser_profile = BrowserProfile(headers=headers, timeout=150000)
-    browser_session = BrowserSession(cdp_url=ws_url, browser_profile=browser_profile, keep_alive=True)
-    
-    await browser_session.start()
-    
-    # Use ChatBedrock instead of ChatBedrockConverse for async support
-    bedrock_chat = ChatBedrock(
-        model_id="us.anthropic.claude-3-7-sonnet-20250219-v1:0",
-        region_name=AWS_REGION
-    )
-    
-    return browser_session, bedrock_chat, client
+    cdp_url, headers = client.generate_ws_headers()
+    pw = await async_playwright().start()
+    browser = await pw.chromium.connect_over_cdp(endpoint_url=cdp_url, headers=headers)
+    context = browser.contexts[0] if browser.contexts else await browser.new_context()
+    page = context.pages[0] if context.pages else await context.new_page()
+    return page, browser, pw, client
 
 # Tools
 @tool
@@ -243,29 +222,48 @@ def execute_python_code(code: str) -> dict:
 @tool
 async def get_weather_data(city: str) -> dict:
     """Get weather forecast for a city using Browser"""
-    browser_session = None
+    page = None
+    browser = None
+    pw = None
+    browser_client = None
     try:
-        browser_session, bedrock_chat, browser_client = await initialize_browser_session()
-        
-        task = f"""Get 8-day weather forecast for {city} from weather.gov:
-1. Go to https://weather.gov
-2. Search for "{city}"
-3. Click "Printable Forecast"
-4. Extract: date, high, low, conditions, wind, precip
-5. Return as JSON array"""
-        
-        result = await run_browser_task(browser_session, bedrock_chat, task)
-        
-        if browser_client:
-            browser_client.stop()
+        page, browser, pw, browser_client = await initialize_browser_session()
 
-        return {"status": "success", "content": [{"text": result}]}
+        await page.goto(f"https://forecast.weather.gov/zipcity.php?inputstring={city}", timeout=30000)
+        await page.wait_for_load_state("domcontentloaded")
+        await page.wait_for_timeout(3000)  # let dynamic content load
+
+        # Try multiple selectors for weather.gov forecast
+        content = ""
+        for selector in ["#detailed-forecast-body", "#seven-day-forecast-body",
+                         "#seven-day-forecast", ".forecast-text", "#current-conditions",
+                         "#current_conditions_detail", "div.panel-body", "#main-content"]:
+            try:
+                el = page.locator(selector)
+                if await el.count() > 0:
+                    content = await el.first.inner_text(timeout=5000)
+                    if content.strip():
+                        break
+            except Exception:
+                continue
+
+        if not content.strip():
+            content = await page.inner_text("body", timeout=5000)
+            content = content[:3000]
+
+        return {"status": "success", "content": [{"text": content.strip()[:3000]}]}
     except Exception as e:
         return {"status": "error", "content": [{"text": f"Error: {str(e)}"}]}
     finally:
-        if browser_session:
+        if browser_client:
             with suppress(Exception):
-                await browser_session.close()
+                browser_client.stop()
+        if browser:
+            with suppress(Exception):
+                await browser.close()
+        if pw:
+            with suppress(Exception):
+                await pw.stop()
 
 @tool
 def save_to_memory(user_id: str, session_id: str, content: str) -> dict:
