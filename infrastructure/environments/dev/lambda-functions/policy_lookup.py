@@ -133,7 +133,7 @@ def lambda_handler(event, context):
     - Security headers
     - Audit logging
     """
-    request_id = context.request_id if context else 'unknown'
+    request_id = context.aws_request_id if context else 'unknown'
     
     try:
         # Log incoming request (sanitized)
