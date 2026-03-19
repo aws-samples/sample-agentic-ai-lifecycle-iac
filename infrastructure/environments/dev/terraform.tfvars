@@ -14,7 +14,7 @@ enable_runtime           = true
 enable_runtime_endpoint  = true
 
 # Change this to the right URL - using dev-latest tag for dev environment
-container_uri = "619071314915.dkr.ecr.us-east-1.amazonaws.com/agentcore-dev-agent:dev-latest"
+container_uri = "123456789123.dkr.ecr.us-east-1.amazonaws.com/agentcore-dev-agent:dev-latest"
 
 create_kms_key      = true # Enabled after adding KMS permissions to boundary
 kms_deletion_window = 7
