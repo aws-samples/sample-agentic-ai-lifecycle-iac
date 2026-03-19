@@ -96,13 +96,6 @@ jobs:
             -backend-config="key=${ENVIRONMENT}/terraform.tfstate" \
             -backend-config="region=${AWS_REGION}"
       
-      - name: Remove traces delivery from state
-        working-directory: ./infrastructure/environments/${{ steps.env.outputs.ENVIRONMENT }}
-        run: |
-          terraform state rm 'module.runtime_observability.aws_cloudwatch_log_delivery.this["traces"]' || true
-          terraform state rm 'module.runtime_observability.aws_cloudwatch_log_delivery_source.this["traces"]' || true
-          terraform state rm 'module.runtime_observability.aws_cloudwatch_log_delivery_destination.this["traces"]' || true
-      
       - name: Terraform Plan
         id: plan
         working-directory: ./infrastructure/environments/${{ steps.env.outputs.ENVIRONMENT }}
