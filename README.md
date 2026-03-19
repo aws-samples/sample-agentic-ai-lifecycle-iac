@@ -28,8 +28,14 @@ Complete end-to-end solution for deploying agentic AI applications using Amazon 
 │       └── dev/                        # Dev environment config
 │           ├── main.tf                 # All resources + modules
 │           ├── bedrock-guardrails.tf   # Bedrock Guardrail config
+│           ├── backend.tf              # Terraform backend config
+│           ├── data.tf                 # Data sources
+│           ├── providers.tf            # Provider configuration
+│           ├── variables.tf            # Variable definitions
+│           ├── outputs.tf              # Output definitions
+│           ├── terraform.tfvars        # Environment variable values
 │           ├── lambda-functions/       # Gateway Lambda target
-│           └── *.tf                    # Variables, outputs, etc.
+│           └── README.md               # Environment-specific docs
 │
 ├── .github/workflows/
 │   ├── 01-build-agent.yml              # Build & push container to ECR
@@ -48,9 +54,9 @@ Complete end-to-end solution for deploying agentic AI applications using Amazon 
 
 ### Agent Application
 - Built with [Strands Agents SDK](https://github.com/strands-agents/strands-agents) using Claude Sonnet 4 as the primary model
-- Browser automation via [browser-use](https://github.com/browser-use/browser-use) with Claude 3.7 Sonnet driving the browser agent
+- Browser automation via AgentCore Browser tool with [Playwright](https://playwright.dev/) for page interaction
 - Integrated with all AgentCore services: Gateway, Memory, Code Interpreter, Browser, Identity
-- Containerized on Amazon Linux 2023 (ARM64) with ADOT for observability
+- Containerized on Amazon Linux 2023 (multi-arch: amd64/arm64) with ADOT for observability
 
 ### Infrastructure Modules
 | Module | Description |
@@ -84,7 +90,7 @@ All log groups use 365-day retention with KMS encryption. X-Ray sampling rules a
 ## IAM Permissions
 
 ### Agent Execution Role
-The agent execution role (`agentcore-{project}-{env}-agent-execution-role`) requires:
+The agent execution role (`{project_name}-{environment}-agent-execution-role`) requires:
 - `BedrockAgentCoreFullAccess` managed policy (AgentCore APIs)
 - `bedrock:InvokeModel` and `bedrock:InvokeModelWithResponseStream` for Claude Sonnet 4 and Claude 3.7 Sonnet
 - `bedrock:ApplyGuardrail` scoped to the guardrail ARN
@@ -115,6 +121,11 @@ The agent execution role (`agentcore-{project}-{env}-agent-execution-role`) requ
 ### 2. Deploy Infrastructure
 ```bash
 cd infrastructure/environments/dev
+
+# Update terraform.tfvars with your ECR container URI
+# Change this to the right URL - using dev-latest tag for dev environment
+container_uri = "<YOUR_ACCOUNT_ID>.dkr.ecr.us-east-1.amazonaws.com/agentcore-dev-agent:dev-latest"
+
 terraform init
 terraform plan
 terraform apply
@@ -142,10 +153,10 @@ Sample prompts:
 
 | Workflow | Trigger | Description |
 |----------|---------|-------------|
-| 01-build-agent | Push to main | Builds Docker image, pushes to ECR |
-| 02-deploy-infra | After build | Terraform init/plan/apply |
-| 03-update-runtime | After deploy | Creates new runtime version, updates endpoint |
-| 04-destroy-infra | Manual | Tears down all infrastructure |
+| 01-build-agent | Push to develop/main/BT (agent-app/** changes) or manual | Builds Docker image (multi-arch), pushes to ECR |
+| 02-deploy-infra | After 01-build-agent completes or manual | Terraform init/plan/apply |
+| 03-update-runtime | Manual (workflow_dispatch) | Updates runtime with a specific container version |
+| 04-destroy-infra | Manual (requires "DESTROY" confirmation) | Tears down all infrastructure |
 
 ## Testing
 
@@ -210,7 +221,7 @@ aws bedrock-agentcore invoke-code-interpreter \
 |-------|-------|-----|
 | `AccessDeniedException: bedrock:ApplyGuardrail` | Agent role missing guardrail permission | Add `bedrock:ApplyGuardrail` scoped to guardrail ARN |
 | `AccessDeniedException: bedrock:InvokeModel` | Agent role missing model invocation permission | Add `bedrock:InvokeModel` for the foundation models used |
-| Browser timeout (15 min) | Agent role can't call the LLM that drives browser-use | Add `bedrock:InvokeModel` for Claude 3.7 Sonnet |
+| Browser timeout (15 min) | Agent role can't call the LLM used by the agent | Add `bedrock:InvokeModel` for Claude Sonnet 4 |
 | Memory/Gateway log delivery fails with `ValidationException` | Wrong log type for resource | Use `APPLICATION_LOGS` (not `USAGE_LOGS`) for memory and gateway |
 | weather.gov returns no results | Non-US city queried | weather.gov only supports US locations |
 
@@ -227,6 +238,8 @@ aws bedrock-agentcore invoke-code-interpreter \
 | `WORKLOAD_IDENTITY_NAME` | Workload identity provider name |
 | `GUARDRAIL_ID` | Bedrock Guardrail ID |
 | `GUARDRAIL_VERSION` | Bedrock Guardrail version |
+
+Note: The agent code also references `API_KEY_PROVIDER_ARN`, but this is currently disabled in the runtime configuration.
 
 ## Security
 
