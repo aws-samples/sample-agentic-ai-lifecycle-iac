@@ -89,7 +89,7 @@ jobs:
           cache-to: type=gha,mode=max
       
       - name: Scan image with Trivy
-        uses: aquasecurity/trivy-action@master
+        uses: aquasecurity/trivy-action@5377f244d77dab82fe81e2a6afc47d7a814cf74b # pinned to SHA for supply chain security
         #continue-on-error: true
         with:
           image-ref: ${{ steps.login-ecr.outputs.registry }}/${{ steps.config.outputs.ecr_repository }}:${{ steps.set-env.outputs.ENVIRONMENT }}-latest
