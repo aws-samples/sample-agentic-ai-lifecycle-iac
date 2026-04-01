@@ -3,7 +3,7 @@
 Complete end-to-end solution for deploying agentic AI applications using Amazon Bedrock AgentCore with Terraform IaC and automated CI/CD via GitHub Actions.
 
 ## Architecture
-![AgentCore Architecture Diagram](architecture.png)
+![AgentCore Architecture Diagram](docs/screenshots/architecture.png)
 
 ## Repository Structure
 
@@ -143,11 +143,13 @@ Navigate to Amazon Bedrock AgentCore → Test → Agent sandbox in the AWS conso
 
 Sample prompts:
 ```json
-{"prompt": "What is POL-001?"}
-{"prompt": "Execute Python code to calculate factorial of 20"}
-{"prompt": "What is the temperature of Seattle?"}
-{"prompt": "Remember that my favorite color is blue. user_id: testuser1, session_id: session001"}
+{"prompt": "Explain Bedrock AgentCore?"}
+{"prompt": "use the code interpreter to calculate the factorial of 20"}
+{"prompt": "what is the weather of seattle"}
+{"prompt": "can you retrieve policies POL-001, POL-002, POL-003 and summarize them?"}
 ```
+
+> See the [Agent Sandbox Validation](#agent-sandbox-validation) section under Testing for detailed validation screenshots.
 
 ## CI/CD Pipeline
 
@@ -159,6 +161,51 @@ Sample prompts:
 | 04-destroy-infra | Manual (requires "DESTROY" confirmation) | Tears down all infrastructure |
 
 ## Testing
+
+### Agent Sandbox Validation
+
+End-to-end validation of all AgentCore capabilities via the Agent Sandbox in the AWS console (Bedrock AgentCore → Test → Agent sandbox).
+
+#### 1. Model Validation
+```json
+{"prompt": "Explain Bedrock AgentCore?"}
+```
+![Model Validation](docs/screenshots/modelvalidation.png)
+
+#### 2. Guardrail Validation
+```json
+{"prompt": "should I Invest in stocks?"}
+```
+![Guardrail Validation](docs/screenshots/guardrailvalidation.png)
+
+#### 3. Code Interpreter Validation
+```json
+{"prompt": "use the code interpreter to calculate the factorial of 20"}
+```
+![Code Interpreter Validation - Request](docs/screenshots/codeInterpreter_1.png)
+![Code Interpreter Validation - Result](docs/screenshots/codeInterpreter_2.png)
+
+#### 4. Browser Validation
+```json
+{"prompt": "what is the weather of seattle"}
+```
+![Browser Validation - Request](docs/screenshots/Browser_validation_1.png)
+![Browser Validation - Result](docs/screenshots/Browser_validation_2.png)
+
+#### 5. Gateway Validation
+```json
+{"prompt": "can you retrieve policies POL-001, POL-002, POL-003 and summarize them?"}
+```
+![Gateway Validation - Request](docs/screenshots/gatewayValidation_1.png)
+![Gateway Validation - Response](docs/screenshots/GatewayValidation_2.png)
+![Gateway Validation - Summary](docs/screenshots/GatewayValidation_3.png)
+
+#### 6. Memory Validation
+```json
+{"prompt": "what is my favorite city check with user Id: 'ABC' and session Id: '01KM3KFPV8D466956JPQ334GPW'"}
+```
+![Memory Validation - Request](docs/screenshots/Memory_validation_1.png)
+![Memory Validation - Result](docs/screenshots/Memory_validation_2.png)
 
 ### Guardrail Validation
 ```bash
