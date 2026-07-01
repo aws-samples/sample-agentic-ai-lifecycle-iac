@@ -136,7 +136,7 @@ terraform apply
 
 ### 3. Build and Push Agent Container
 ```bash
-cd agent-app
+cd sample-agentic-ai-lifecycle-iac/agent-app
 docker build --platform linux/arm64 -t agentcore-agent:latest .
 # Tag and push to ECR (automated via GitHub Actions workflow 01)
 ```
