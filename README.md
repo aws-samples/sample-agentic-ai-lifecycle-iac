@@ -126,6 +126,9 @@ cd infrastructure/environments/dev
 # Change this to the right URL - using dev-latest tag for dev environment
 container_uri = "<YOUR_ACCOUNT_ID>.dkr.ecr.us-east-1.amazonaws.com/agentcore-dev-agent:dev-latest"
 
+# Update backend.tf with your bucket name
+bucket = "agentcore-tfstate-123456789012"  # Replace 123456789012 with your account ID
+
 terraform init
 terraform plan
 terraform apply
